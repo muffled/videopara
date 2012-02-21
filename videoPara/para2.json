@@ -1,0 +1,13 @@
+{
+	"video_width":640,
+	"video_height":480,
+	"detect_width":460,
+	"detect_height":56,
+	"tripwire_height":20,
+	"time_per_frame":40,
+	"life_mean":251,
+	"life_std":150,
+	"ts_std":364,
+	"te_std":359,
+	"sampleThresh":20
+}

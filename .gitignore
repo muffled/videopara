@@ -1,0 +1,7 @@
+Debug/
+Release/
+videoPara/Debug/
+videoPara/Release/
+videoPara/testresult/
+videoPara/*.txt
+*.ncb
