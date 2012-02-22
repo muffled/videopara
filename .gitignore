@@ -3,5 +3,6 @@ Release/
 videoPara/Debug/
 videoPara/Release/
 videoPara/testresult/
+videoPara/verify/
 videoPara/*.txt
 *.ncb

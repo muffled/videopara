@@ -401,6 +401,7 @@ void CVideoParams::playVideo(std::string videopath)
     // 处理第二个视频时，将前一个视频的结果清空
     m_listTrajectory.clear();
     m_list_finishedTrajectory.clear();
+    m_list_unfinishedTrajectory.clear();
 
     Mat Frame;
     int nFrame = 0;
@@ -427,7 +428,9 @@ void CVideoParams::playVideo(std::string videopath)
         if (!Frame.data) break;
 
         // 角点跟踪
-        m_tracker.calcOpticalFlowPyrLK(m_listTrajectory,m_list_finishedTrajectory,Frame,nFrame);
+        //m_tracker.calcOpticalFlowPyrLK(m_listTrajectory,m_list_finishedTrajectory,Frame,nFrame);
+        m_tracker.calcOpticalFlowPyrLK(m_listTrajectory,m_list_finishedTrajectory,
+                                       m_list_unfinishedTrajectory,Frame,nFrame);
         // 角点检测       
         m_tracker.goodFeaturesToTrack(Frame,m_listTrajectory,nFrame++);
 
@@ -1055,6 +1058,12 @@ void CVideoParams::featuresStatus(std::string videopath,std::string resultpath)
         clusTra_vec.push_back(tra_map);
     }
 
+#ifdef _DEBUG
+    // 验证输出是否正确。
+    // 将同一个批次的点依次打印在相应的帧上面。
+    vector<CTrajectory> outputVerify;  
+#endif
+
     ofstream outfile(".\\info.txt");
     for (size_t i = 0;i < clusTra_vec.size();i++)
     {
@@ -1066,6 +1075,11 @@ void CVideoParams::featuresStatus(std::string videopath,std::string resultpath)
         {
             outfile<<"team:"<<index++<<endl;
             vector<CTrajectory>& tra_vec = it->second;
+
+#ifdef _DEBUG
+            if (i == 0 && index == 15)
+                outputVerify = tra_vec;
+#endif
 
             // 获取同一批次轨迹中包含的最长的帧数maxFrame，则同一批次轨迹共需输出maxFrame行。
             size_t maxFrame = 0;
@@ -1093,6 +1107,75 @@ void CVideoParams::featuresStatus(std::string videopath,std::string resultpath)
             }
         }
     }
+
+#ifdef _DEBUG
+
+    VideoCapture video(videopath);
+    if (!video.isOpened())
+    {
+        cerr<<"can not open the video:"<<videopath<<endl;
+        return;
+    }
+    Mat Frame;
+    for (size_t i = 0;i < 10;i++) video >> Frame;   // 去掉开始的10帧图片
+
+    ulong nFrame = 0,index = 0;
+    char szverify[256];
+    memset(szverify,0,sizeof(szverify));
+    ulong startFrame,endFrame = 0;
+    // 所有轨迹具有相同的起始帧
+    startFrame = outputVerify[0].getStartFrame();
+    // 选取最后结束的帧
+    for (size_t i = 0;i < outputVerify.size();i++)
+    {
+        ulong tmp = outputVerify[i].getEndFrame();
+        if (tmp > endFrame) endFrame = tmp;
+    }
+
+    for (ulong i = 0;i < startFrame;i++) video >> Frame;
+    for (ulong i = startFrame;i <= endFrame;i++)
+    {
+        video >> Frame;
+        for (size_t j = 0;j < outputVerify.size();j++)
+        {
+            vector<Point2f>& trajectory = outputVerify[j].getTrajectory();
+            size_t size = trajectory.size();
+            int red,blue,green;
+
+            if (j % 4 == 0)
+            {
+                red = 255;
+                blue = green = 0;
+            }
+            else if (j % 4 == 1)
+            {
+                green = 255;
+                red = blue = 0;
+            }
+            else if (j % 4 == 2)
+            {
+                blue = 255;
+                red = green = 0;
+            }
+            else
+            {
+                red = green = 255;
+                blue = 0;
+            }
+
+            if (index >= size)
+                circle(Frame,trajectory[size - 1],2,CV_RGB(red,green,blue),-1);
+            else
+                circle(Frame,trajectory[index],2,CV_RGB(red,green,blue),-1);
+        }
+        rectangle(Frame,Rect(45,106,230,28),CV_RGB(0,0,0),1);
+        rectangle(Frame,Rect(45,134,230,10),CV_RGB(0,0,0),1);
+        sprintf_s(szverify,".\\verify\\%d.jpg",index++);
+        imwrite(szverify,Frame);
+    }
+
+#endif
+
 }
 
 void GetTripwireRectAndDetectRect(cv::Size& videoSize,cv::Size& detectSize,int tripwireHeight,cv::Rect& tripwireRect,cv::Rect& detectRect)

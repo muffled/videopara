@@ -182,7 +182,7 @@ void CLKTTracker::calcOpticalFlowPyrLK(std::list<CTrajectory>& listTrajectory,st
 
             if (cur_dist > 25*pre_dist+1)
             {
-				unfinished_listTrajectory.push_back(*it);
+				//unfinished_listTrajectory.push_back(*it);
                 it = listTrajectory.erase(it);
                 continue;
             }
