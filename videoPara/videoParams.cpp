@@ -1014,6 +1014,12 @@ ofstream& operator << (ofstream& os,Point2f a)
     return os;
 }
 
+struct _trajectory
+{
+    vector<CTrajectory> m_validTrajectory;
+    vector<CTrajectory> m_invalidTrajectory;
+};
+
 void CVideoParams::featuresStatus(std::string videopath,std::string resultpath)
 {
     playVideo(videopath);
@@ -1034,6 +1040,7 @@ void CVideoParams::featuresStatus(std::string videopath,std::string resultpath)
     m_cluster.cluster(m_list_finishedTrajectory,1);
     vector<clusterTrajectory> clusTra = m_cluster.getClusterTrajectory(); 
 
+    // 将有效轨迹以帧作为键值存放到字典中，不同聚类分开存放。
     vector<map<ulong,vector<CTrajectory> > > clusTra_vec;
     for (size_t i = 0;i < clusTra.size();i++)
     {
@@ -1058,12 +1065,141 @@ void CVideoParams::featuresStatus(std::string videopath,std::string resultpath)
         clusTra_vec.push_back(tra_map);
     }
 
+    // 将跟踪丢失的轨迹以帧作为键值存放到字典中。
+    map<ulong,vector<CTrajectory> > invalidTra_map;
+    map<ulong,vector<CTrajectory> >::iterator invalidTra_map_it;
+    for (list<CTrajectory>::iterator it = m_list_unfinishedTrajectory.begin();
+        it != m_list_unfinishedTrajectory.end();it++)
+    {
+        ulong startFrame = it->getStartFrame();
+        invalidTra_map_it = invalidTra_map.find(startFrame);
+        if (invalidTra_map_it != invalidTra_map.end())
+            invalidTra_map_it->second.push_back(*it);
+        else
+        {
+            vector<CTrajectory> tmp;
+            tmp.push_back(*it);
+            invalidTra_map.insert(std::pair<ulong,vector<CTrajectory> >(startFrame,tmp));
+        }            
+    } 
+
+    // 将跟踪丢失的轨迹和同其同一帧开始的有效轨迹存储到一起。
+    // 轨迹按照聚类分开存储，同一聚类的轨迹按组存储。
+    vector<map<ulong,_trajectory> > trajectory_team_cluseter;
+    for (size_t i = 0;i < clusTra_vec.size();i++)
+    {
+        map<ulong,vector<CTrajectory> >& validTra_map = clusTra_vec[i];
+        map<ulong,vector<CTrajectory> >::iterator validTra_map_it,invalidTra_map_it;
+        map<ulong,_trajectory> trajectory_team;
+        map<ulong,_trajectory>::iterator tra_team_it;
+
+        for (validTra_map_it = validTra_map.begin();validTra_map_it != validTra_map.end();validTra_map_it++)
+        {
+            ulong startFrame = validTra_map_it->first;
+            invalidTra_map_it = invalidTra_map.find(startFrame);
+            _trajectory tmp;
+            if (invalidTra_map_it != invalidTra_map.end())
+            {               
+                tmp.m_validTrajectory = validTra_map_it->second;
+                tmp.m_invalidTrajectory = invalidTra_map_it->second;
+                trajectory_team.insert(std::pair<ulong,_trajectory>(startFrame,tmp));
+            }
+            else
+            {
+                tmp.m_validTrajectory = validTra_map_it->second;
+                tmp.m_validTrajectory = vector<CTrajectory>();
+                trajectory_team.insert(std::pair<ulong,_trajectory>(startFrame,tmp));
+            }
+        }
+
+        trajectory_team_cluseter.push_back(trajectory_team);
+    }
+
 #ifdef _DEBUG
-    // 验证输出是否正确。
+    // 验证输出是否正确。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
     // 将同一个批次的点依次打印在相应的帧上面。
     vector<CTrajectory> outputVerify;  
+    vector<CTrajectory> invalidFeaturesVerify;
+#endif
+    
+
+    ofstream outfile(".\\info.txt");
+    for (size_t i = 0;i < trajectory_team_cluseter.size();i++)
+    {
+        outfile<<"cluster:"<<i + 1<<endl;
+        map<ulong,_trajectory>& trajectory_team = trajectory_team_cluseter[i];
+        map<ulong,_trajectory>::iterator tra_team_it;
+        int index = 1;
+        for (tra_team_it = trajectory_team.begin();tra_team_it != trajectory_team.end();tra_team_it++)
+        {
+            outfile<<"team:"<<index++;
+            vector<CTrajectory>& valid_tra_vec = tra_team_it->second.m_validTrajectory;
+            vector<CTrajectory>& invalid_tra_vec = tra_team_it->second.m_invalidTrajectory;
+            outfile<<" valid features:"<<valid_tra_vec.size()<<endl;
+
+#ifdef _DEBUG
+            if (i == 0 && index == 15)               
+            {
+                outputVerify = valid_tra_vec;
+                cout<<"outputVerify size:"<<outputVerify.size()<<endl;
+                invalidFeaturesVerify = invalid_tra_vec;
+                cout<<"invalidFeaturesVerify size:"<<invalidFeaturesVerify.size()<<endl;
+            }
 #endif
 
+            // 获取同一批次轨迹中包含的最长的帧数maxFrame，则同一批次轨迹共需输出maxFrame行。
+            size_t maxFrame = 0;
+            for (size_t j = 0;j < valid_tra_vec.size();j++)
+            {
+                vector<Point2f>& trajectory = valid_tra_vec[j].getTrajectory();
+                size_t nframe = trajectory.size();
+                if (nframe > maxFrame) maxFrame = nframe;
+            }
+            for (size_t j = 0;j < invalid_tra_vec.size();j++)
+            {
+                vector<Point2f>& trajectory = invalid_tra_vec[j].getTrajectory();
+                size_t nframe = trajectory.size();
+#ifdef _DEBUG
+                if (i == 0 && index == 15)
+                {
+                    if (nframe > 2)
+                        cout<<"size is more than 2"<<endl;
+                }
+#endif
+                if (nframe > maxFrame) maxFrame = nframe;
+            }
+
+            // 输出同一批次的估计在各个帧中的位置信息。
+            for (size_t j = 0;j < maxFrame;j++)
+            {
+                // 有效轨迹
+                for (size_t k = 0;k < valid_tra_vec.size();k++)
+                {
+                    vector<Point2f>& trajectory = valid_tra_vec[k].getTrajectory();
+                    size_t size = trajectory.size();
+                    if (j >= size)
+                        outfile<<trajectory[size - 1];
+                    else
+                        outfile<<trajectory[j];
+                    outfile<<" ";
+                }
+                // 无效轨迹
+                for (size_t k = 0;k < invalid_tra_vec.size();k++)
+                {
+                    vector<Point2f>& trajectory = invalid_tra_vec[k].getTrajectory();
+                    size_t size = trajectory.size();
+                    if (j >= size)
+                        outfile<<trajectory[size - 1];
+                    else
+                        outfile<<trajectory[j];
+                    outfile<<" ";
+                }
+                outfile<<endl;
+            }
+        }
+    }
+
+    /*
     ofstream outfile(".\\info.txt");
     for (size_t i = 0;i < clusTra_vec.size();i++)
     {
@@ -1107,6 +1243,8 @@ void CVideoParams::featuresStatus(std::string videopath,std::string resultpath)
             }
         }
     }
+    */
+    
 
 #ifdef _DEBUG
 
@@ -1131,17 +1269,24 @@ void CVideoParams::featuresStatus(std::string videopath,std::string resultpath)
         ulong tmp = outputVerify[i].getEndFrame();
         if (tmp > endFrame) endFrame = tmp;
     }
+    for (size_t i = 0;i < invalidFeaturesVerify.size();i++)
+    {
+        ulong tmp = invalidFeaturesVerify[i].getEndFrame();
+        if (tmp > endFrame) endFrame = tmp;
+    }
 
     for (ulong i = 0;i < startFrame;i++) video >> Frame;
+
+    ofstream verifyfile(".\\verify.txt");
     for (ulong i = startFrame;i <= endFrame;i++)
     {
         video >> Frame;
+/*
         for (size_t j = 0;j < outputVerify.size();j++)
         {
             vector<Point2f>& trajectory = outputVerify[j].getTrajectory();
-            size_t size = trajectory.size();
+            size_t size = trajectory.size();           
             int red,blue,green;
-
             if (j % 4 == 0)
             {
                 red = 255;
@@ -1162,12 +1307,42 @@ void CVideoParams::featuresStatus(std::string videopath,std::string resultpath)
                 red = green = 255;
                 blue = 0;
             }
-
             if (index >= size)
                 circle(Frame,trajectory[size - 1],2,CV_RGB(red,green,blue),-1);
             else
                 circle(Frame,trajectory[index],2,CV_RGB(red,green,blue),-1);
         }
+*/
+        for (size_t j = 0;j < outputVerify.size();j++)
+        {
+            vector<Point2f>& trajectory = outputVerify[j].getTrajectory();
+            size_t size = trajectory.size();  
+            if (index >= size)
+                circle(Frame,trajectory[size - 1],2,CV_RGB(255,255,0),-1);
+            else
+                circle(Frame,trajectory[index],2,CV_RGB(255,255,0),-1);
+        }
+        for (size_t j = 0;j < invalidFeaturesVerify.size();j++)
+        {
+            vector<Point2f>& trajectory = invalidFeaturesVerify[j].getTrajectory();
+            size_t size = trajectory.size();  
+            if (size > 2)
+            {
+                cout<<"invalid features size is more than 2"<<endl;
+            }
+            if (index >= size)
+            {
+                circle(Frame,trajectory[size - 1],2,CV_RGB(0,0,255),-1);
+                verifyfile<<trajectory[size - 1];
+            }
+            else
+            {
+                circle(Frame,trajectory[index],2,CV_RGB(0,0,255),-1);
+                verifyfile<<trajectory[index];
+            }
+            verifyfile<<" ";
+        }
+        verifyfile<<endl;
         rectangle(Frame,Rect(45,106,230,28),CV_RGB(0,0,0),1);
         rectangle(Frame,Rect(45,134,230,10),CV_RGB(0,0,0),1);
         sprintf_s(szverify,".\\verify\\%d.jpg",index++);
